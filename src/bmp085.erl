@@ -48,6 +48,13 @@
 -define(BMP_PRESSURE, 16#34).
 -define(BMP_PRESSURE_LOC, 16#F6).
 -define(MODE, 16#1).       %% standard mode (3 others exist)
+
+-ifdef(debug).
+-define(LOG(X,Y), io:format(X,Y)).
+-else.
+-define(LOG(X,Y), true).
+-endif.
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -139,31 +146,31 @@ handle_call({temperature}, _From, State) ->
 handle_call({pressure}, _From, State) ->
     UT = read_raw_temp(State#state.sensor_pid),
     UP = read_raw_pressure(State#state.sensor_pid),
-    io:format("UP = ~w~n",[UP]),
+    ?LOG("UP = ~w~n",[UP]),
     Mode = 3,
 
     X1 = ((UT - State#state.ac6) * State#state.ac5) bsr 15,
     X2 = (State#state.mc bsl 11) / (X1 + State#state.mdval),
     B5 = trunc(X1 + X2),
-    io:format("B5 = ~w~n",[B5]),
+    ?LOG("B5 = ~w~n",[B5]),
 
     B6 = B5 - 4000,
-    io:format("B6 = ~w~n",[B6]),
+    ?LOG("B6 = ~w~n",[B6]),
 
     T1 = (State#state.b2 * (trunc(B6 * B6) bsr 12)) bsr 11,
     T2 = (State#state.ac2 * B6) bsr 11,
     T3 = T1 + T2,
     B3 = (((State#state.ac1 * 4 + T3) bsl Mode) + 2) / 4,
-    io:format("B3 = ~w~n",[B3]),
+    ?LOG("B3 = ~w~n",[B3]),
 
     W1 = (State#state.ac3 * B6) bsr 13,
     W2 = (State#state.b1 * (trunc(B6 * B6) bsr 12)) bsr 16,
     W3 = ((W1 + W2) + 2) bsr 2,
     B4 = (State#state.ac4 * (W3 + 32768)) bsr 15,
-    io:format("B4 = ~w~n",[B4]),
+    ?LOG("B4 = ~w~n",[B4]),
 
     B7 = trunc((UP - B3) * (50000 bsr Mode)),
-    io:format("B7 = ~w~n",[B7]),
+    ?LOG("B7 = ~w~n",[B7]),
     P = trunc(p_calc(B7, B4)),
     Z1 = (P bsr 8) * (P bsr 8),
     Z2 = (Z1 * 3038) bsr 16,
@@ -262,9 +269,9 @@ read_raw_pressure(Sensor) ->
     i2c:write(Sensor, << ?BMP_CONTROL,?BMP_PRESSURE >>),
     timer:sleep(8),
     Result = i2c:write_read(Sensor,<<?BMP_PRESSURE_LOC>>,4),
-    io:format("Raw pressure result = ~w~n",[Result]),
+    ?LOG("Raw pressure result = ~w~n",[Result]),
     << MSB, LSB, _, RB>> = Result,
-    io:format("MSB = ~.16#, LSB = ~.16#, RB = ~.16#~n",[MSB, LSB, RB]), 
+    ?LOG("MSB = ~.16#, LSB = ~.16#, RB = ~.16#~n",[MSB, LSB, RB]), 
     pressure_convert(MSB, LSB, RB).
     
 
@@ -273,9 +280,12 @@ round(Number, Precision) ->
     round(Number * P) / P.
 
 pressure_convert(A, B, C) -> 
-    io:format("A = ~.16#, B = ~.16#, C = ~.16#~n",[A,B,C]), 
+    ?LOG("A = ~.16#, B = ~.16#, C = ~.16#~n",[A,B,C]), 
     ((A bsl 16) + (B bsl 8) + C) bsr 5.
 
+
+%% This is a complex step in the pressure calculation that was best taken
+%% out into a function with a guard expression
 p_calc(B7, B4) when B7 < 16#80000000 ->
     (B7 * 2 ) / B4;
 p_calc(B7, B4) ->
