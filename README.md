@@ -14,6 +14,6 @@ For example, I called it now and got `{ok,21.51,70.72}`.
 
 ## Air pressure
 
-When You call `bmp085::read_pressure(Sensor_PID)`, you get `{ok, <air pressure in Pa>}`. 1 Pa equals 0.01hPa or 0.01mbar.
+When you call `bmp085::read_pressure(Sensor_PID)`, you get `{ok, <air pressure in Pa>}`. 1 Pa equals 0.01hPa or 0.01mbar.
 
 For example, I called it now and got `{ok,98958}`.
