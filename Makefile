@@ -1,2 +1,2 @@
-PROJECT = sensor
+PROJECT = bmp085
 include erlang.mk
