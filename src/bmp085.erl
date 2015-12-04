@@ -13,7 +13,8 @@
 
 
 %% The PID for the sensor process and the calibration data
-%% related to the sensor.
+%% related to the sensor. This is data extracted from the sensor hardware
+%% we are using.
 -record( state, {sensor_pid,
 		 ac1,
 		 ac2,
@@ -32,7 +33,7 @@
 %% API
 -export(
    [read_temp/1,
-    read_pressure/1,
+    read_pressure/2,
     read_altitude/1]).
 
 
@@ -47,7 +48,16 @@
 -define(BMP_TEMP, 16#2E).
 -define(BMP_PRESSURE, 16#34).
 -define(BMP_PRESSURE_LOC, 16#F6).
--define(MODE, 16#1).       %% standard mode (3 others exist)
+
+-define(ULTRALOWPOWER, 16#0).     %% ultra low power mode 
+-define(STANDARD, 16#1).          %% standard mode 
+-define(HIGHRES, 16#2).           %% high resultion mode 
+-define(ULTRAHIGHRES, 16#3).       %% ultra high resultion mode 
+
+-define(ULTRALOW_DELAY,5).
+-define(STANDARD_DELAY, 8).
+-define(HIGHRES_DELAY, 14).
+-define(ULTRAHIGHRES_DELAY, 26).
 
 -ifdef(debug).
 -define(LOG(X,Y), io:format(X,Y)).
@@ -62,8 +72,14 @@
 read_temp(PID) ->
     gen_server:call(PID,{temperature}).
 
-read_pressure(PID) ->
-    gen_server:call(PID,{pressure}).
+read_pressure(PID, ultralowpower) ->
+    gen_server:call(PID,{pressure, ultralowpower});
+read_pressure(PID, standard) ->
+    gen_server:call(PID,{pressure, standard});
+read_pressure(PID, highres) ->
+    gen_server:call(PID,{pressure, highres});
+read_pressure(PID, ultrahighres) ->
+    gen_server:call(PID,{pressure, ultrahighres}).
 
 read_altitude(_PID) ->
     ok.
@@ -143,43 +159,18 @@ handle_call({temperature}, _From, State) ->
     Reply = {ok, round(Celsius,2),
 	     round( (Celsius * 1.8) + 32, 2)},
     {reply, Reply, State};
-handle_call({pressure}, _From, State) ->
-    UT = read_raw_temp(State#state.sensor_pid),
-    UP = read_raw_pressure(State#state.sensor_pid),
-    ?LOG("UP = ~w~n",[UP]),
-    Mode = 3,
-
-    X1 = ((UT - State#state.ac6) * State#state.ac5) bsr 15,
-    X2 = (State#state.mc bsl 11) / (X1 + State#state.mdval),
-    B5 = trunc(X1 + X2),
-    ?LOG("B5 = ~w~n",[B5]),
-
-    B6 = B5 - 4000,
-    ?LOG("B6 = ~w~n",[B6]),
-
-    T1 = (State#state.b2 * (trunc(B6 * B6) bsr 12)) bsr 11,
-    T2 = (State#state.ac2 * B6) bsr 11,
-    T3 = T1 + T2,
-    B3 = (((State#state.ac1 * 4 + T3) bsl Mode) + 2) / 4,
-    ?LOG("B3 = ~w~n",[B3]),
-
-    W1 = (State#state.ac3 * B6) bsr 13,
-    W2 = (State#state.b1 * (trunc(B6 * B6) bsr 12)) bsr 16,
-    W3 = ((W1 + W2) + 2) bsr 2,
-    B4 = (State#state.ac4 * (W3 + 32768)) bsr 15,
-    ?LOG("B4 = ~w~n",[B4]),
-
-    B7 = trunc((UP - B3) * (50000 bsr Mode)),
-    ?LOG("B7 = ~w~n",[B7]),
-    P = trunc(p_calc(B7, B4)),
-    Z1 = (P bsr 8) * (P bsr 8),
-    Z2 = (Z1 * 3038) bsr 16,
-    Z3 = (-7357 * P) bsr 16,
-    Pressure = P + ((Z2 + Z3 + 3791) bsr 4),
-
-    Reply = {ok, Pressure},
-
-    {reply, Reply, State};
+handle_call({pressure, ultralowpower}, _From, State) ->
+    Pressure = pressure_read(State,?ULTRALOWPOWER,?ULTRALOW_DELAY),
+    {reply, {ok, Pressure}, State};
+handle_call({pressure, standard}, _From, State) ->
+    Pressure = pressure_read(State,?STANDARD,?STANDARD_DELAY),
+    {reply, {ok, Pressure}, State};
+handle_call({pressure, highres}, _From, State) ->
+    Pressure = pressure_read(State,?HIGHRES,?HIGHRES_DELAY),
+    {reply, {ok, Pressure}, State};
+handle_call({pressure, ultrahighres}, _From, State) ->
+    Pressure = pressure_read(State,?ULTRAHIGHRES,?ULTRAHIGHRES_DELAY),
+    {reply, {ok, Pressure}, State};
 
 handle_call(_Request, _From, State) ->
     Reply = ok,
@@ -265,9 +256,9 @@ read_raw_temp(Sensor) ->
     <<_, _, MSB, LSB, _/binary>> = i2c:read(Sensor,8),
     register_convert(MSB, LSB).
     
-read_raw_pressure(Sensor) ->
+read_raw_pressure(Sensor, Delay) ->
     i2c:write(Sensor, << ?BMP_CONTROL,?BMP_PRESSURE >>),
-    timer:sleep(8),
+    timer:sleep(Delay),
     Result = i2c:write_read(Sensor,<<?BMP_PRESSURE_LOC>>,4),
     ?LOG("Raw pressure result = ~w~n",[Result]),
     << MSB, LSB, _, RB>> = Result,
@@ -290,3 +281,38 @@ p_calc(B7, B4) when B7 < 16#80000000 ->
     (B7 * 2 ) / B4;
 p_calc(B7, B4) ->
     (B7 / B4) * 2.
+
+pressure_read(State, Mode, Delay) ->
+    UT = read_raw_temp(State#state.sensor_pid),
+    UP = read_raw_pressure(State#state.sensor_pid, Delay),
+    ?LOG("UP = ~w~n",[UP]),
+
+    X1 = ((UT - State#state.ac6) * State#state.ac5) bsr 15,
+    X2 = (State#state.mc bsl 11) / (X1 + State#state.mdval),
+    B5 = trunc(X1 + X2),
+    ?LOG("B5 = ~w~n",[B5]),
+
+    B6 = B5 - 4000,
+    ?LOG("B6 = ~w~n",[B6]),
+
+    T1 = (State#state.b2 * (trunc(B6 * B6) bsr 12)) bsr 11,
+    T2 = (State#state.ac2 * B6) bsr 11,
+    T3 = T1 + T2,
+    B3 = (((State#state.ac1 * 4 + T3) bsl Mode) + 2) / 4,
+    ?LOG("B3 = ~w~n",[B3]),
+
+    W1 = (State#state.ac3 * B6) bsr 13,
+    W2 = (State#state.b1 * (trunc(B6 * B6) bsr 12)) bsr 16,
+    W3 = ((W1 + W2) + 2) bsr 2,
+    B4 = (State#state.ac4 * (W3 + 32768)) bsr 15,
+    ?LOG("B4 = ~w~n",[B4]),
+
+    B7 = trunc((UP - B3) * (50000 bsr Mode)),
+    ?LOG("B7 = ~w~n",[B7]),
+    P = trunc(p_calc(B7, B4)),
+    Z1 = (P bsr 8) * (P bsr 8),
+    Z2 = (Z1 * 3038) bsr 16,
+    Z3 = (-7357 * P) bsr 16,
+    Result = P + ((Z2 + Z3 + 3791) bsr 4),
+    Result.
+
