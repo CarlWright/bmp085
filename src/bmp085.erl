@@ -34,7 +34,7 @@
 -export(
    [read_temp/1,
     read_pressure/2,
-    read_altitude/1]).
+    read_altitude/2]).
 
 
 -export([start_link/0]).
@@ -58,6 +58,7 @@
 -define(STANDARD_DELAY, 8).
 -define(HIGHRES_DELAY, 14).
 -define(ULTRAHIGHRES_DELAY, 26).
+-define(SEALEVEL_PA,  101325.0).
 
 -ifdef(debug).
 -define(LOG(X,Y), io:format(X,Y)).
@@ -81,8 +82,15 @@ read_pressure(PID, highres) ->
 read_pressure(PID, ultrahighres) ->
     gen_server:call(PID,{pressure, ultrahighres}).
 
-read_altitude(_PID) ->
-    ok.
+read_altitude(PID, ultralowpower) ->
+    gen_server:call(PID,{altitude, ultralowpower});
+read_altitude(PID, standard) ->
+    gen_server:call(PID,{altitude, standard});
+read_altitude(PID, highres) ->
+    gen_server:call(PID,{altitude, highres});
+read_altitude(PID, ultrahighres) ->
+    gen_server:call(PID,{altitude, ultrahighres}).
+
 
 
 %%--------------------------------------------------------------------
@@ -171,6 +179,19 @@ handle_call({pressure, highres}, _From, State) ->
 handle_call({pressure, ultrahighres}, _From, State) ->
     Pressure = pressure_read(State,?ULTRAHIGHRES,?ULTRAHIGHRES_DELAY),
     {reply, {ok, Pressure}, State};
+
+handle_call({altitude, ultralowpower}, _From, State) ->
+    Altitude = altitude_read(State,?ULTRALOWPOWER,?ULTRALOW_DELAY),
+    {reply, {ok, Altitude}, State};
+handle_call({altitude, standard}, _From, State) ->
+    Altitude = altitude_read(State,?STANDARD,?STANDARD_DELAY),
+    {reply, {ok, Altitude}, State};
+handle_call({altitude, highres}, _From, State) ->
+    Altitude = altitude_read(State,?HIGHRES,?HIGHRES_DELAY),
+    {reply, {ok, Altitude}, State};
+handle_call({altitude, ultrahighres}, _From, State) ->
+    Altitude = altitude_read(State,?ULTRAHIGHRES,?ULTRAHIGHRES_DELAY),
+    {reply, {ok, Altitude}, State};
 
 handle_call(_Request, _From, State) ->
     Reply = ok,
@@ -316,3 +337,6 @@ pressure_read(State, Mode, Delay) ->
     Result = P + ((Z2 + Z3 + 3791) bsr 4),
     Result.
 
+altitude_read(State, Mode, Delay) ->
+Pressure = float(pressure_read(State, Mode, Delay) ),
+44330.0 * ( 1.0 - math:pow(( Pressure / ?SEALEVEL_PA), (1.0 /5.255))) .
