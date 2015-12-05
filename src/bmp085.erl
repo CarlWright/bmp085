@@ -256,23 +256,23 @@ read_raw_temp(Sensor) ->
     <<_, _, MSB, LSB, _/binary>> = i2c:read(Sensor,8),
     register_convert(MSB, LSB).
     
-read_raw_pressure(Sensor, Delay) ->
-    i2c:write(Sensor, << ?BMP_CONTROL,?BMP_PRESSURE >>),
+read_raw_pressure(Sensor, Mode, Delay) ->
+    i2c:write(Sensor, << ?BMP_CONTROL, (?BMP_PRESSURE + (Mode bsl 6)) >>),
     timer:sleep(Delay),
     Result = i2c:write_read(Sensor,<<?BMP_PRESSURE_LOC>>,4),
     ?LOG("Raw pressure result = ~w~n",[Result]),
     << MSB, LSB, _, RB>> = Result,
     ?LOG("MSB = ~.16#, LSB = ~.16#, RB = ~.16#~n",[MSB, LSB, RB]), 
-    pressure_convert(MSB, LSB, RB).
+    pressure_convert(MSB, LSB, RB, Mode).
     
 
 round(Number, Precision) ->
     P = math:pow(10, Precision),
     round(Number * P) / P.
 
-pressure_convert(A, B, C) -> 
+pressure_convert(A, B, C, Mode) -> 
     ?LOG("A = ~.16#, B = ~.16#, C = ~.16#~n",[A,B,C]), 
-    ((A bsl 16) + (B bsl 8) + C) bsr 5.
+    ((A bsl 16 ) + (B bsl 8) + C) bsr (8 - Mode).
 
 
 %% This is a complex step in the pressure calculation that was best taken
@@ -284,7 +284,7 @@ p_calc(B7, B4) ->
 
 pressure_read(State, Mode, Delay) ->
     UT = read_raw_temp(State#state.sensor_pid),
-    UP = read_raw_pressure(State#state.sensor_pid, Delay),
+    UP = read_raw_pressure(State#state.sensor_pid, Mode, Delay),
     ?LOG("UP = ~w~n",[UP]),
 
     X1 = ((UT - State#state.ac6) * State#state.ac5) bsr 15,
