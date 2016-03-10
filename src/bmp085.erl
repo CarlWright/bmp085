@@ -255,8 +255,15 @@ code_change(_OldVsn, State, _Extra) ->
 %% the register's hold calibration numbers for the specific
 %% sensor needed to convert raw data into conventional measurements
 download_register( Sensor, Address) ->
-    << N1, N2 >> = i2c:write_read(Sensor,<< Address >>, 2),
-    register_convert(N1, N2).
+    download_register( Sensor, Address,1).
+
+download_register( Sensor, Address, N) when N < 4 ->
+    case  i2c:write_read(Sensor,<< Address >>, 2) of
+	{error, i2c_wrrd_failed} -> download_register(Sensor, Address, N + 1);
+
+	<< N1, N2 >> -> register_convert(N1, N2)
+    end.
+
 
 download_unsigned_register( Sensor, Address) ->
     << N1, N2 >> = i2c:write_read(Sensor,<< Address >>, 2),
